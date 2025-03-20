@@ -1,0 +1,209 @@
+import re
+from datetime import datetime
+import heapq
+import pytz
+
+# Define IST timezone
+IST = pytz.timezone('Asia/Kolkata')
+
+def get_due_date_input():
+    """Function to get the due date and time from the user in IST."""
+    while True:
+        due_date_input = input("Please enter the due date (YYYY-MM-DD), time (HH:MM), or both (YYYY-MM-DD HH:MM): ")
+
+        try:
+            # If the input has both date and time (YYYY-MM-DD HH:MM)
+            due_date = datetime.strptime(due_date_input, "%Y-%m-%d %H:%M")
+            due_date = IST.localize(due_date)  # Convert to IST timezone
+            return due_date
+        except ValueError:
+            pass
+
+        try:
+            # If the input has only date (YYYY-MM-DD), default time to 23:59
+            due_date = datetime.strptime(due_date_input, "%Y-%m-%d")
+            due_date = IST.localize(due_date.replace(hour=23, minute=59))
+            return due_date
+        except ValueError:
+            pass
+
+        try:
+            # If the input has only time (HH:MM), set today's date with the provided time in IST
+            due_time = datetime.strptime(due_date_input, "%H:%M").time()
+            now_ist = datetime.now(IST)
+            due_date = datetime(now_ist.year, now_ist.month, now_ist.day, due_time.hour, due_time.minute)
+            due_date = IST.localize(due_date)
+
+            # If the due time is in the past, set it for the next day
+            #if due_date < now_ist:
+                #due_date = due_date.replace(day=now_ist.day + 1)
+
+            return due_date
+        except ValueError:
+            pass
+
+        print("Invalid format. Please enter a valid date and/or time in the correct format.")
+
+def is_valid_task_id(task_id):
+    """Validates the task ID to ensure it's in the format T001, T002, etc."""
+    pattern = r"^T\d{3}$"  # Task ID format T001, T002, ...
+    return bool(re.match(pattern, task_id))
+
+class Task:
+    def __init__(self, task_id, title, priority_level, description=""):
+        if not is_valid_task_id(task_id):
+            raise ValueError(f"Invalid task ID format: {task_id}. Task ID should be in the format T001, T002, ...")
+        self.task_id = task_id
+        self.title = title
+        self.due_date = get_due_date_input()  # Get the due date and time input in IST
+        self.priority_level = priority_level
+        self.description = description
+        self.status = "Pending"
+
+    def update_status(self, status):
+        self.status = status
+        print("Task", self.task_id, "status updated to", self.status)
+
+    def __str__(self):
+        return f"ID: {self.task_id}, Title: \"{self.title}\", Due: \"{self.due_date.strftime('%Y-%m-%d %H:%M:%S %Z')}\", Priority: {self.priority_level}, Status: \"{self.status}\""
+
+    def is_due(self):
+        """Checks if the task is overdue, considering both date and time in IST."""
+        current_time = datetime.now(IST)
+        return self.due_date < current_time and self.status != "Completed"
+
+    def get_priority_score(self):
+        """Calculates the priority score based on time left and priority level."""
+        time_left = (self.due_date - datetime.now(IST)).total_seconds()
+        priority_score = self.priority_level * 1000 - time_left
+        return priority_score
+
+class TaskManager:
+    def __init__(self):
+        self.tasks = {}
+        self.task_queue = []
+
+    def add_task(self, task):
+        if task.task_id in self.tasks:
+            print("Error:", "Task ID", task.task_id, "already exists.")
+            return False
+        self.tasks[task.task_id] = task
+        heapq.heappush(self.task_queue, (task.get_priority_score(), task.task_id))
+        print("Task", task.title, "adding.")
+        return True
+
+    def remove_task(self, task_id):
+        if task_id in self.tasks:
+            task = self.tasks.pop(task_id)
+            print("Task", task.title, "removed.")
+        else:
+            print("Task with ID", task_id, "not found.")
+
+    def update_task_status(self, task_id, status):
+        if task_id in self.tasks:
+            self.tasks[task_id].update_status(status)
+        else:
+            print("Task with ID", task_id, "not found.")
+
+    def recommend_task(self):
+        tasks_to_consider = [task for task in self.tasks.values() if task.status != "Completed"]
+        if tasks_to_consider:
+            sorted_tasks = sorted(tasks_to_consider, key=lambda task: (task.due_date, task.priority_level))
+            return sorted_tasks[0]
+        return None
+
+    def display_all_tasks(self):
+        if not self.tasks:
+            print("No tasks in the system.")
+        else:
+            print("\n--- All Tasks ---")
+            for task in self.tasks.values():
+                print(task)
+
+    def display_due_tasks(self):
+        """Displays tasks that are overdue considering both date and time in IST."""
+        due_tasks = [task for task in self.tasks.values() if task.is_due()]
+        if not due_tasks:
+            print("No overdue tasks.")
+        else:
+            print("\n--- Overdue Tasks ---")
+            for task in due_tasks:
+                print(task)
+
+    def display_task_recommendations(self):
+        task = self.recommend_task()
+        if task:
+            print("\nRecommended Task to Complete:", task)
+        else:
+            print("No tasks to recommend right now.")
+
+def display_menu():
+    print("\n--- Task Management System ---")
+    print("1. Add Task")
+    print("2. Remove Task")
+    print("3. Update Task Status")
+    print("4. View All Tasks")
+    print("5. View Overdue Tasks")
+    print("6. Recommend Next Task")
+    print("7. Exit")
+
+def main():
+    task_manager = TaskManager()
+    running = True
+
+    while running:
+        display_menu()
+        try:
+            choice = int(input("Enter your choice: "))
+            if choice == 1:
+                task_id = input("Enter Task ID (e.g., T001): ")
+
+                # Check if the task ID is valid before proceeding
+                if not is_valid_task_id(task_id):
+                    raise ValueError(f"Invalid task ID format: {task_id}. Task ID should be in the format T001, T002, ...")
+
+                # Ensure the task ID is unique before proceeding
+                if task_id in task_manager.tasks:
+                    print(f"Error: Task ID {task_id} already exists. Please choose a unique ID.")
+                    continue
+
+                title = input("Enter Task Title: ")
+                priority_level = int(input("Enter Priority Level (1: High, 2: Medium, 3: Low): "))
+                description = input("Enter Task Description (optional): ")
+
+                try:
+                    new_task = Task(task_id, title, priority_level, description)
+                    if task_manager.add_task(new_task):
+                        print("Task", title, "added successfully.")
+                except ValueError as e:
+                    print(e)
+
+            elif choice == 2:
+                task_id = input("Enter Task ID to remove: ")
+                task_manager.remove_task(task_id)
+
+            elif choice == 3:
+                task_id = input("Enter Task ID to update: ")
+                status = input("Enter new status (Pending, In Progress, Completed): ")
+                task_manager.update_task_status(task_id, status)
+
+            elif choice == 4:
+                task_manager.display_all_tasks()
+
+            elif choice == 5:
+                task_manager.display_due_tasks()
+
+            elif choice == 6:
+                task_manager.display_task_recommendations()
+
+            elif choice == 7:
+                print("Exiting Task Management System. Goodbye!")
+                running = False
+
+            else:
+                print("Invalid choice. Please try again.")
+        except ValueError as e:
+            print(f"Error: {e}. Please try again.")
+
+if __name__ == "__main__":
+    main()
